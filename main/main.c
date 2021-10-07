@@ -185,45 +185,148 @@ static void guiTask(void *pvParameter)
 #endif
     vTaskDelete(NULL);
 }
+//static void btn_event_cb(lv_event_t * e)
+//{
+    //lv_event_code_t code = lv_event_get_code(e);
+    //lv_obj_t * btn = lv_event_get_target(e);
+    //if(code == LV_EVENT_CLICKED) {
+        //static uint8_t cnt = 0;
+        //cnt++;
+
+        ///*Get the first child of the button which is the label and change its text*/
+        //lv_obj_t * label = lv_obj_get_child(btn, 0);
+        //lv_label_set_text_fmt(label, "Button: %d", cnt);
+    //}
+//}
+static lv_obj_t * meter;
+static lv_obj_t * meter2;
+
+static void set_value(void * indic, int32_t v)
+{
+    lv_meter_set_indicator_value(meter, indic, v);
+}
+
+static void set_value2(void * indic2, int32_t v)
+{
+    lv_meter_set_indicator_value(meter2, indic2, v);
+}
 
 static void create_demo_application(void)
 {
-    /* When using a monochrome display we only show "Hello World" centered on the
-     * screen */
-#if defined CONFIG_LV_TFT_DISPLAY_MONOCHROME || \
-    defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7735S
 
-    /* use a pretty small demo for monochrome displays */
-    /* Get the current screen  */
-    lv_obj_t *scr = lv_disp_get_scr_act(NULL);
+//    lv_obj_t * btn = lv_btn_create(lv_scr_act());     /*Add a button the current screen*/
+    //lv_obj_set_pos(btn, 10, 10);                            /*Set its position*/
+    //lv_obj_set_size(btn, 120, 50);                          /*Set its size*/
+    //lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_ALL, NULL);           /*Assign a callback to the button*/
 
-    /*Create a Label on the currently active screen*/
-    lv_obj_t *label1 =  lv_label_create(scr, NULL);
+    //lv_obj_t * label = lv_label_create(btn);          /*Add a label to the button*/
+    //lv_label_set_text(label, "n");                     /*Set the labels text*/
+    //lv_obj_center(label);
 
-    /*Modify the Label's text*/
-    lv_label_set_text(label1, "Hello\nworld");
+    meter = lv_meter_create(lv_scr_act());
+    meter2 = lv_meter_create(lv_scr_act());
+    // lv_obj_center(meter);
+    lv_obj_align(meter, LV_ALIGN_LEFT_MID, 25, -25);
+    lv_obj_set_size(meter, 125, 125);
+    lv_obj_align(meter2, LV_ALIGN_RIGHT_MID, -25, -25);
+    lv_obj_set_size(meter2, 125, 125);
 
-    /* Align the Label to the center
-     * NULL means align on parent (which is the screen now)
-     * 0, 0 at the end means an x, y offset after alignment*/
-    lv_obj_align(label1, NULL, LV_ALIGN_CENTER, 0, 0);
-#else
-    /* Otherwise we show the selected demo */
+    /*Add a scale first*/
+    lv_meter_scale_t * scale = lv_meter_add_scale(meter);
+    lv_meter_set_scale_ticks(meter, scale, 41, 2, 10, lv_palette_main(LV_PALETTE_GREY));
+    lv_meter_set_scale_major_ticks(meter, scale, 8, 4, 15, lv_color_black(), 10);
 
-#if defined CONFIG_LV_USE_DEMO_WIDGETS
-    lv_demo_widgets();
-#elif defined CONFIG_LV_USE_DEMO_KEYPAD_AND_ENCODER
-    lv_demo_keypad_encoder();
-#elif defined CONFIG_LV_USE_DEMO_BENCHMARK
-    lv_demo_benchmark();
-#elif defined CONFIG_LV_USE_DEMO_STRESS
-    lv_demo_stress();
-#elif defined CONFIG_LV_USE_DEMO_MUSIC
-    lv_demo_music();
-#else
-#error "No demo application selected."
-#endif
-#endif
+    lv_meter_indicator_t * indic;
+
+    /*Add a blue arc to the start*/
+    indic = lv_meter_add_arc(meter, scale, 3, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_meter_set_indicator_start_value(meter, indic, 0);
+    lv_meter_set_indicator_end_value(meter, indic, 20);
+
+    /*Make the tick lines blue at the start of the scale*/
+    indic = lv_meter_add_scale_lines(meter, scale, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_BLUE), false, 0);
+    lv_meter_set_indicator_start_value(meter, indic, 0);
+    lv_meter_set_indicator_end_value(meter, indic, 20);
+
+    /*Add a red arc to the end*/
+    indic = lv_meter_add_arc(meter, scale, 3, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_meter_set_indicator_start_value(meter, indic, 80);
+    lv_meter_set_indicator_end_value(meter, indic, 100);
+
+    /*Make the tick lines red at the end of the scale*/
+    indic = lv_meter_add_scale_lines(meter, scale, lv_palette_main(LV_PALETTE_RED), lv_palette_main(LV_PALETTE_RED), false, 0);
+    lv_meter_set_indicator_start_value(meter, indic, 80);
+    lv_meter_set_indicator_end_value(meter, indic, 100);
+
+    /*Add a needle line indicator*/
+    indic = lv_meter_add_needle_line(meter, scale, 4, lv_palette_main(LV_PALETTE_GREY), -10);
+
+    /*Add a scale first*/
+    lv_meter_scale_t * scale2 = lv_meter_add_scale(meter2);
+    lv_meter_set_scale_ticks(meter2, scale2, 41, 2, 10, lv_palette_main(LV_PALETTE_GREY));
+    lv_meter_set_scale_major_ticks(meter2, scale2, 8, 4, 15, lv_color_black(), 10);
+
+    lv_meter_indicator_t * indic2;
+
+    /*Add a blue arc to the start*/
+    indic2 = lv_meter_add_arc(meter2, scale2, 3, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_meter_set_indicator_start_value(meter2, indic2, 0);
+    lv_meter_set_indicator_end_value(meter2, indic2, 20);
+
+    /*Make the tick lines blue at the start of the scale*/
+    indic2 = lv_meter_add_scale_lines(meter2, scale, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_BLUE), false, 0);
+    lv_meter_set_indicator_start_value(meter2, indic2, 0);
+    lv_meter_set_indicator_end_value(meter2, indic2, 20);
+
+    /*Add a red arc to the end*/
+    indic2 = lv_meter_add_arc(meter2, scale2, 3, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_meter_set_indicator_start_value(meter2, indic2, 80);
+    lv_meter_set_indicator_end_value(meter2, indic2, 100);
+
+    /*Make the tick lines red at the end of the scale*/
+    indic2 = lv_meter_add_scale_lines(meter2, scale2, lv_palette_main(LV_PALETTE_RED), lv_palette_main(LV_PALETTE_RED), false, 0);
+    lv_meter_set_indicator_start_value(meter2, indic2, 80);
+    lv_meter_set_indicator_end_value(meter2, indic2, 100);
+
+    /*Add a needle line indicator*/
+    indic2 = lv_meter_add_needle_line(meter2, scale2, 4, lv_palette_main(LV_PALETTE_GREY), -10);
+
+    lv_obj_t * label1 = lv_label_create(lv_scr_act());
+    lv_label_set_long_mode(label1, LV_LABEL_LONG_WRAP);     /*Break the long lines*/
+    lv_obj_set_style_text_font(label1, &lv_font_montserrat_20, 0);
+    lv_label_set_recolor(label1, true);                      /*Enable re-coloring by commands in the text*/
+    lv_label_set_text(label1, LV_SYMBOL_LOOP);
+    lv_obj_set_width(label1, 150);  /*Set smaller width to make the lines wrap*/
+    lv_obj_set_style_text_align(label1, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(label1, LV_ALIGN_BOTTOM_MID, 0, -40);
+
+    /*Create an animation to set the value*/
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_exec_cb(&a, set_value);
+    lv_anim_set_var(&a, indic);
+    lv_anim_set_values(&a, 0, 100);
+    lv_anim_set_time(&a, 2000);
+    lv_anim_set_repeat_delay(&a, 100);
+    lv_anim_set_playback_time(&a, 500);
+    lv_anim_set_playback_delay(&a, 100);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+
+   /*Create an animation to set the value*/
+    lv_anim_t a2;
+    lv_anim_init(&a2);
+    lv_anim_set_exec_cb(&a2, set_value2);
+    lv_anim_set_var(&a2, indic2);
+    lv_anim_set_values(&a2, 100, 0);
+    lv_anim_set_time(&a2, 2000);
+    lv_anim_set_repeat_delay(&a2, 100);
+    lv_anim_set_playback_time(&a2, 500);
+    lv_anim_set_playback_delay(&a2, 100);
+    lv_anim_set_repeat_count(&a2, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a2);
+    
+
 }
 
 static void lv_tick_task(void *arg)
