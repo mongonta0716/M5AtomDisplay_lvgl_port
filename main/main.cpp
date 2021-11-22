@@ -18,43 +18,29 @@
 #include "esp_freertos_hooks.h"
 #include "freertos/semphr.h"
 #include "esp_system.h"
-#include "driver/gpio.h"
-#include "axp192.h"
-#include "i2c_manager.h"
 
+#include <M5AtomDisplay.h>
+
+#define DISPLAY_WIDTH 1280
+#define DISPLAY_HEIGHT 720
+#define REFRESH_RATE   60
+
+M5AtomDisplay display(DISPLAY_WIDTH, DISPLAY_HEIGHT, REFRESH_RATE);
+//M5AtomDisplay tft;
+
+extern "C" {
 /* Littlevgl specific */
-#ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include "lvgl.h"
-#else
-#include "lvgl/lvgl.h"
-#endif
 
-#include "lvgl_helpers.h"
+static lv_disp_draw_buf_t disp_buf;
+static lv_color_t buf[DISPLAY_WIDTH * 10];
 
-#define CONFIG_LV_USE_DEMO_MUSIC
-
-#ifndef CONFIG_LV_TFT_DISPLAY_MONOCHROME
-#if defined CONFIG_LV_USE_DEMO_WIDGETS
-#include "lv_demos/src/lv_demo_widgets/lv_demo_widgets.h"
-#elif defined CONFIG_LV_USE_DEMO_KEYPAD_AND_ENCODER
-#include "lv_demos/src/lv_demo_keypad_encoder/lv_demo_keypad_encoder.h"
-#elif defined CONFIG_LV_USE_DEMO_BENCHMARK
-#include "lv_demos/src/lv_demo_benchmark/lv_demo_benchmark.h"
-#elif defined CONFIG_LV_USE_DEMO_STRESS
-#include "lv_demos/src/lv_demo_stress/lv_demo_stress.h"
-#elif defined CONFIG_LV_USE_DEMO_MUSIC
-#include "lv_demos/src/lv_demo_music/lv_demo_music.h"
-#else
-#error "No demo application selected."
-#endif
-#endif
 
 /*********************
  *      DEFINES
  *********************/
 #define TAG "demo"
 #define LV_TICK_PERIOD_MS 1
-#define I2C_0 i2c_hal(0)
 
 /**********************
  *  STATIC PROTOTYPES
@@ -63,97 +49,42 @@ static void lv_tick_task(void *arg);
 static void guiTask(void *pvParameter);
 static void create_demo_application(void);
 
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
+{
+    uint32_t w = (area->x2 - area->x1 + 1);
+    uint32_t h = (area->y2 - area->y1 + 1);
+
+    display.startWrite();
+    //display.pushImageDMA(area->x1, area->y1, w, h, &color_p->full); // 画面表示が乱れる
+    display.setAddrWindow(area->x1, area->y1, w, h);
+    display.pushColors(&color_p->full, w * h, false);
+    display.endWrite();
+
+    lv_disp_flush_ready(disp);
+}
+
+
 /**********************
  *   APPLICATION MAIN
  **********************/
-void app_main()
+void setup_task(void)
 {
-    /* Initialize your hardware. */
-    axp192_init(I2C_0);
-    axp192_ioctl(I2C_0, AXP192_GPIO0_SET_LEVEL, AXP192_HIGH);  // M-Bus Power
-    axp192_ioctl(I2C_0, AXP192_GPIO1_SET_LEVEL, AXP192_LOW);   // Enable LED
-    axp192_ioctl(I2C_0, AXP192_GPIO2_SET_LEVEL, AXP192_LOW);   // Disable speaker
-    axp192_ioctl(I2C_0, AXP192_LDO2_SET_VOLTAGE, 3300);        // Set LDO2 LCD&TP voltage
-    axp192_ioctl(I2C_0, AXP192_LDO2_ENABLE);                   // Enable LDO2
-    axp192_ioctl(I2C_0, AXP192_GPIO4_SET_LEVEL, AXP192_LOW);   // LCD&TP Reset
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    axp192_ioctl(I2C_0, AXP192_GPIO4_SET_LEVEL, AXP192_HIGH);  // LCD&TP Hold
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-
     /* If you want to use a task to create the graphic, you NEED to create a Pinned task
      * Otherwise there can be problem such as memory corruption and so on.
      * NOTE: When not using Wi-Fi nor Bluetooth you can pin the guiTask to core 0 */
-    xTaskCreatePinnedToCore(guiTask, "gui", 4096 * 10, NULL, 0, NULL, 0);
-}
+    display.init();
 
-/* Creates a semaphore to handle concurrent call to lvgl stuff
- * If you wish to call *any* lvgl function from other threads/tasks
- * you should lock on the very same semaphore! */
-SemaphoreHandle_t xGuiSemaphore;
-
-static void guiTask(void *pvParameter)
-{
-    (void) pvParameter;
-    xGuiSemaphore = xSemaphoreCreateMutex();
-
+    lv_disp_draw_buf_init(&disp_buf, buf, NULL, DISPLAY_WIDTH * 10);
     lv_init();
 
-    /* Initialize SPI or I2C bus used by the drivers */
-    lvgl_driver_init();
-
-    lv_color_t *buf1 = heap_caps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    assert(buf1 != NULL);
-
-    /* Use double buffered when not working with monochrome displays */
-#ifndef CONFIG_LV_TFT_DISPLAY_MONOCHROME
-    lv_color_t *buf2 = heap_caps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    assert(buf2 != NULL);
-#else
-    static lv_color_t *buf2 = NULL;
-#endif
-
-    static lv_disp_draw_buf_t disp_buf;
-
-    uint32_t size_in_px = DISP_BUF_SIZE;
-
-#if defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_IL3820         \
-    || defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_JD79653A    \
-    || defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_UC8151D     \
-    || defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_SSD1306
-
-    /* Actual size in pixels, not bytes. */
-    size_in_px *= 8;
-#endif
-
-    /* Initialize the working buffer depending on the selected display.
-     * NOTE: buf2 == NULL when using monochrome displays. */
-    lv_disp_draw_buf_init(&disp_buf, buf1, buf2, size_in_px);
-
-    lv_disp_drv_t disp_drv;
+    /*Initialize the display*/
+    static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res = LV_HOR_RES_MAX;
-    disp_drv.ver_res = LV_VER_RES_MAX;
-    disp_drv.flush_cb = disp_driver_flush;
-
-    /* When using a monochrome display we need to register the callbacks:
-     * - rounder_cb
-     * - set_px_cb */
-#ifdef CONFIG_LV_TFT_DISPLAY_MONOCHROME
-    disp_drv.rounder_cb = disp_driver_rounder;
-    disp_drv.set_px_cb = disp_driver_set_px;
-#endif
-
+    disp_drv.hor_res = DISPLAY_WIDTH;
+    disp_drv.ver_res = DISPLAY_HEIGHT;
+    disp_drv.flush_cb = my_disp_flush;
     disp_drv.draw_buf = &disp_buf;
     lv_disp_drv_register(&disp_drv);
-
-    /* Register an input device when enabled on the menuconfig */
-#if CONFIG_LV_TOUCH_CONTROLLER != TOUCH_CONTROLLER_NONE
-    lv_indev_drv_t indev_drv;
-    lv_indev_drv_init(&indev_drv);
-    indev_drv.read_cb = touch_driver_read;
-    indev_drv.type = LV_INDEV_TYPE_POINTER;
-    lv_indev_drv_register(&indev_drv);
-#endif
 
     /* Create and start a periodic timer interrupt to call lv_tick_inc */
     const esp_timer_create_args_t periodic_timer_args = {
@@ -164,76 +95,45 @@ static void guiTask(void *pvParameter)
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, LV_TICK_PERIOD_MS * 1000));
 
-    /* Create the demo application */
     create_demo_application();
 
-    while (1) {
-        /* Delay 1 tick (assumes FreeRTOS tick is 10ms */
-        vTaskDelay(pdMS_TO_TICKS(10));
-
-        /* Try to take the semaphore, call lvgl related function on success */
-        if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY)) {
-            lv_task_handler();
-            xSemaphoreGive(xGuiSemaphore);
-        }
-    }
-
-    /* A task should NEVER return */
-    free(buf1);
-#ifndef CONFIG_LV_TFT_DISPLAY_MONOCHROME
-    free(buf2);
-#endif
-    vTaskDelete(NULL);
 }
-//static void btn_event_cb(lv_event_t * e)
-//{
-    //lv_event_code_t code = lv_event_get_code(e);
-    //lv_obj_t * btn = lv_event_get_target(e);
-    //if(code == LV_EVENT_CLICKED) {
-        //static uint8_t cnt = 0;
-        //cnt++;
 
-        ///*Get the first child of the button which is the label and change its text*/
-        //lv_obj_t * label = lv_obj_get_child(btn, 0);
-        //lv_label_set_text_fmt(label, "Button: %d", cnt);
-    //}
-//}
+void loop_task(void) {
+
+    lv_timer_handler();
+    vTaskDelay(5/portTICK_PERIOD_MS);
+
+}
+
+
 static lv_obj_t * meter;
 static lv_obj_t * meter2;
 
 static void set_value(void * indic, int32_t v)
 {
-    lv_meter_set_indicator_value(meter, indic, v);
+    lv_meter_set_indicator_value(meter, (lv_meter_indicator_t*)indic, v);
 }
 
 static void set_value2(void * indic2, int32_t v)
 {
-    lv_meter_set_indicator_value(meter2, indic2, v);
+    lv_meter_set_indicator_value(meter2, (lv_meter_indicator_t*)indic2, v);
 }
 
 static void create_demo_application(void)
 {
 
-//    lv_obj_t * btn = lv_btn_create(lv_scr_act());     /*Add a button the current screen*/
-    //lv_obj_set_pos(btn, 10, 10);                            /*Set its position*/
-    //lv_obj_set_size(btn, 120, 50);                          /*Set its size*/
-    //lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_ALL, NULL);           /*Assign a callback to the button*/
-
-    //lv_obj_t * label = lv_label_create(btn);          /*Add a label to the button*/
-    //lv_label_set_text(label, "n");                     /*Set the labels text*/
-    //lv_obj_center(label);
-
     meter = lv_meter_create(lv_scr_act());
     meter2 = lv_meter_create(lv_scr_act());
     // lv_obj_center(meter);
     lv_obj_align(meter, LV_ALIGN_LEFT_MID, 25, -25);
-    lv_obj_set_size(meter, 125, 125);
+    lv_obj_set_size(meter, 300, 300);
     lv_obj_align(meter2, LV_ALIGN_RIGHT_MID, -25, -25);
-    lv_obj_set_size(meter2, 125, 125);
+    lv_obj_set_size(meter2, 300, 300);
 
     /*Add a scale first*/
     lv_meter_scale_t * scale = lv_meter_add_scale(meter);
-    lv_meter_set_scale_ticks(meter, scale, 41, 2, 10, lv_palette_main(LV_PALETTE_GREY));
+    lv_meter_set_scale_ticks(meter, scale, 41, 2, 10, lv_palette_main(LV_PALETTE_PINK));
     lv_meter_set_scale_major_ticks(meter, scale, 8, 4, 15, lv_color_black(), 10);
 
     lv_meter_indicator_t * indic;
@@ -263,7 +163,7 @@ static void create_demo_application(void)
 
     /*Add a scale first*/
     lv_meter_scale_t * scale2 = lv_meter_add_scale(meter2);
-    lv_meter_set_scale_ticks(meter2, scale2, 41, 2, 10, lv_palette_main(LV_PALETTE_GREY));
+    lv_meter_set_scale_ticks(meter2, scale2, 41, 2, 10, lv_palette_main(LV_PALETTE_PINK));
     lv_meter_set_scale_major_ticks(meter2, scale2, 8, 4, 15, lv_color_black(), 10);
 
     lv_meter_indicator_t * indic2;
@@ -335,3 +235,21 @@ static void lv_tick_task(void *arg)
 
     lv_tick_inc(LV_TICK_PERIOD_MS);
 }
+
+#if !defined ( ARDUINO )
+  void loopTask(void*)
+  {
+    setup_task();
+    for (;;) {
+      loop_task();
+    }
+    vTaskDelete(NULL);
+  }
+
+  void app_main()
+  {
+    xTaskCreatePinnedToCore(loopTask, "loopTask", 8192, NULL, 1, NULL, 1);
+  }
+#endif
+
+} // extern "C"
